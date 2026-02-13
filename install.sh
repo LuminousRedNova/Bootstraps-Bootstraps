@@ -1,170 +1,161 @@
-#!/bin/bash
+#!/bin/zsh
 
-# Get root privelages
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+
+# Exit if non zero status returned
+set -e
+
+echo "This script requires administrative priveleges."
+echo "Please enter your password below..."
+
 sudo -v
 
-# Brew packages to install
-PACKAGES=(
-  apache-spark
-  awscli
-  bash
-  cloc
-  consul
-  coreutils
-  findutils
-  gcc
-  git
-  gnu-sed
-  gnupg
-  hadolint
-  helm
-  openssh
-  ipython
-  kubernetes-cli
-  lsd
-  mas
-  node
-  nvm
-  postgresql
-  pyenv
-  ruby
-  sqlite
-  stern
-  terraform
-  the_silver_searcher
-  tmux
-  tree
-  vault
-  vim
-  watch
-  yamllint
-  zsh
-)
+echo "Beginning development environment setup!"
 
-# Brew casks to install
-CASKS=(
-  1password
-  atom
-  dbeaver-community
-  docker
-  firefox
-  google-chrome
-  insomnia
-  intellij-idea-ce
-  iterm2
-  pycharm-ce
-  rectangle
-  slack
-  temurin
-  visual-studio-code
-)
+# Installing xcode-select
+if ! xcode-select -p &>/dev/null; then
+  echo "Installing xcode-select..."
+  xcode-select --install
 
-# Install developer tools
-echo "Installing Dev Tools..."
-xcode-select --install
-echo "Press return when ready to move on..."
-read -n 1 
+  sleep 1
+  osascript -e 'tell application "System Events"' \
+    -e 'tell process "Install Command Line Developer Tools"' \
+    -e 'keystroke return' \
+    -e 'click button "Agree" of window "License Agreement"' \
+    -e 'end tell' \
+    -e 'end tell'
 
-# Install homebrew
-echo "Installing homebrew..."
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-echo "Press return when ready to move on..."
-read -n 1
-echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-eval "$(/opt/hombrew/bin/brew shellenv)"
+  echo "Waiting for Xcode command lines tools to install..."
+  while ! xcode-select -p $ >/dev/null; do sleep 10; done
+  echo "Xcode CLI tools installed!"
+else
+  echo "Xcode command line tools already installed!"
+fi
 
+# Installing Homebrew
+if ! command -v brew &>/dev/null; then
+  echo "Installing Homebrew..."
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-echo "Installing homebrew goodies..."
-brew update
-brew install ${PACKAGES[@]}
-brew install --cask --appdir="~/Applications" ${CASKS[@]}
-brew tap homebrew/cask-fonts
-brew install --cask font-hack-nerd-font
-brew cleanup
+  echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >>~/.zprofile
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+  echo "Homebrew installed!"
+else
+  echo "Homebrew already installed. Updating..."
+  brew update
+fi
 
-# Install applications from App Store
-echo "Installing Mac Apps..."
-echo "Please log into Mac App Store to continue and press return when ready..."
-read -n 1
-mas install 603117688 # CCMenu
-mas install 1457158844 # Take a Break - 20/20/20
-mas install 1423210932 # Flow - Pomodoro
-mas install 937984704 # Amphetamine
-mas install 497799835 # Xcode
+BREWFILE_PATH="$SCRIPT_DIR/Brewfile"
+if [ -f "$BREWFILE_PATH" ]; then
+  echo "Installing Brew Formulae..."
+  brew bundle --file="$BREWFILE_PATH"
+else
+  echo "Brewfile not found! Skipping installation!"
+fi
 
-# Install OhMyZsh
-echo "Installing OhMyZsh..."
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+echo "Installing Nerdfonts..."
+wget -O /tmp/FiraCode.zip https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/FiraCode.zip
+unzip /tmp/FiraCode.zip -d /tmp/FiraCode/
+cp -n /tmp/FiraCode/*.ttf ~/Library/Fonts/
+rm -rf /tmp/FiraCode.zip
+rm -rf /tmp/FiraCode/
+echo "Nerdfonts Installed!"
 
-# Install ZSH plugins
-echo "Installing OhMyZsh Plugins..."
-# Auto Suggestions
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-# Syntax Highlighting
-git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+# Install Oh My ZSH
+if ! command -v omz &>/dev/null; then
+  echo "Installing Oh My ZSH..."
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+  echo "OMZ installed!"
+else
+  echo "Oh My ZSH Already Installed"
+fi
 
-# Cloning Spaceship prompt for ZSH
-echo "Installing Spaceship..."
+ZSH_CUSTOM=${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}
+
+# Installing Oh My ZSH Plugins
+echo "Installing plugins..."
+if [ ! -d "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" ]; then
+  echo "Syntax Highlighting..."
+  git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+  echo "Auto Suggestions..."
+  git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+  echo "Plugins downloaded!"
+fi
+
+echo "Configuring OMZ Plugins..."
+awk '
+!in_plugin && /^plugins=\(/{
+  print "plugins=(\n git\n zsh-syntax-highlighting\n zsh-autosuggestions\n brew\n macos\n aws\n mvn\n gradle\n kubectl\n jfrog\n sdk\n)\n"
+  in_plugin=1
+}
+in_plugin && /\)/{
+  in_plugin=0
+  next
+}
+!in_plugin { print }
+' ~/.zshrc >~/.zshrc.tmp
+echo "OMZ plugins configured!"
+
+echo "Installing Spaceship Theme for OMZ..."
 git clone https://github.com/spaceship-prompt/spaceship-prompt.git "$ZSH_CUSTOM/themes/spaceship-prompt" --depth=1
 ln -s "$ZSH_CUSTOM/themes/spaceship-prompt/spaceship.zsh-theme" "$ZSH_CUSTOM/themes/spaceship.zsh-theme"
+awk -v theme="spaceship" '/^ZSH_THEME=/ { $0 = "ZSH_THEME=\"" theme "\"" } { print }' ~/.zshrc.tmp >~/.zshrc.tmp2
+echo "Spaceship theme installed!"
 
-# Make room for code
-echo "Making Code Folder..."
-mkdir -p ~/Code
+echo "Modifying zshrc file..."
+cp ~/.zshrc ~/.zshrc.bk
+mv ~/.zshrc.tmp2 ~/.zshrc
+rm ~/.zshrc.tmp
+echo "Zshrc modification complete!"
 
-# Installing preferences 
-echo "Installing Preferences..."
-mv ~/.zshrc ~/.zshrc_backup
-cp zshrc ~/.zshrc
-cp vimrc ~/.vimrc
-cp com.googlecode.iterm2.plist ~/Code/Preferences/com.googlecode.iterm2.plist
+echo "Adding personal aliases..."
+if ! grep -q "# --- Custom Aliases ---" ~/.zshrc; then
+  cat <<'EOF' >>~/.zshrc
 
-# Install Powerline fonts
-echo "Installing Powerline Fonts..."
-# clone
-git clone https://github.com/powerline/fonts.git --depth=1
-# install
-cd fonts
-./install.sh
-# clean-up a bit
-cd ..
-rm -rf fonts
-
-# Virtual Python Environments
-echo "Installing Python Virtual Environments..."
-pip3 install virtualenv
-pip3 install virtualenvwrapper
-
-echo "Setting some cool settings..."
-# Require password immediately after sleep or screen saver begins
-defaults write com.apple.screensaver askForPassword -int 1
-defaults write com.apple.screensaver askForPasswordDelay -int 0
-
-# Finder: don't show all filename extensions
-defaults write NSGlobalDomain AppleShowAllExtensions -bool false
-
-# Save to disk (not to iCloud) by default
-defaults write NSGlobalDomain NSDocumentSaveNewDocumentsToCloud -bool false
-
-# Set a blazingly fast keyboard repeat rate
-defaults write NSGlobalDomain KeyRepeat -int 2
-defaults write NSGlobalDomain InitialKeyRepeat -int 15
-
-# Use column view in all Finder windows by default
-# Four-letter codes for the other view modes: `icnv`, `clmv`, `Flwv`
-defaults write com.apple.finder FXPreferredViewStyle -string "clmv"
-
-# Bottom left screen corner → Start screen saver
-defaults write com.apple.dock wvous-bl-corner -int 5
-defaults write com.apple.dock wvous-bl-modifier -int 0
-
-# VS Code Extentions
-cat << EOF >> ~/.zshrc
-# Add Visual Studio Code (code)
-export PATH="/Applications/Visual Studio Code.app/Contents/Resources/app/bin:$PATH"
+# --- Custom Aliases ---
+alias c='clear'
+alias gdc='git diff --cached'
+alias hook='python3 ~/.commit-helper/prepare-commit-msg --install'
+alias unhook='rm -rfv .git/hooks/prepare-commit-msg'
+alias undocommit='git reset HEAD~1 --soft && git restore --staged .'
 EOF
+  echo "Aliases added!"
+else
+  echo "Aliases block already exists!"
+fi
 
-cat vscodeExtensions.txt | xargs code --install-extension --force
+echo "Adding custom functions..."
+if ! grep -q "# --- Custom Functions ---" ~/.zshrc; then
+  cat <<'EOF' >>~/.zshrc
 
-echo "Make sure to change your iTerm to use ~/Code/Preferences/com.googlecode.iterm2.plist"
-echo "DONE!"
+# --- Custom Functions ---
+# Decoding JWT Token
+# https://www.pgrs.net/2022/06/02/simple-command-line-function-to-decode-jwts/
+jwt-decode() {
+  jq -R 'split(".") |.[0:2] | map(gsub("-"; "+") | gsub("_"; "/") | gsub("%3D"; "=") | @base64d) | map(fromjson)' <<< $1
+}
+EOF
+  echo "Functions added!"
+else
+  echo "Function block already exists"
+fi
+
+if ! command -v sdk &>/dev/null; then
+  echo "Installing sdkman..."
+  curl -s "https://get.sdkman.io?ci=true" | bash
+  source "$HOME/.sdkman/bin/sdkman-init.sh"
+else
+  echo "SDKMan already installed!"
+fi
+
+echo "Installing Java Versions..."
+yes | sdk install java 8.0.452-amzn
+yes | sdk install java 21.0.7-tem
+
+# Download and install nvm:
+if ! command -v nvm &>/dev/null; then
+  echo "Installing nvm..."
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+else
+  echo "NVM already installed!"
+fi
